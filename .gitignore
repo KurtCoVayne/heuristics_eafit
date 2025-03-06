@@ -1,4 +1,6 @@
 .venv
 *.aux
 *.gz
+*.xlsx
+.DS_store
 _minted*

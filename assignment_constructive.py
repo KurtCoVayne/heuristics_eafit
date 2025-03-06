@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 
@@ -195,44 +196,46 @@ def evaluar_solucion(assignments, zone_load):
     }
 
 
-def generar_excel_asignaciones(result, output_file):
+def generar_excel_asignaciones(result, output_file, file_path):
     """
     Genera un archivo Excel con las asignaciones de órdenes a posiciones.
 
     Args:
         result: Diccionario con los resultados de la solución
         output_file: Ruta del archivo Excel a generar
+        file_path: Ruta del archivo de entrada para extraer el nombre de la instancia
     """
-    # Crear un DataFrame con las asignaciones
+    # Crear un DataFrame con las asignaciones (Hoja "Solucion")
     df_assignments = pd.DataFrame(
         [(order, position) for order, position, _ in result["assignments"]],
         columns=["Pedido", "Salida"],
     )
 
-    # Crear un DataFrame con los costos por zona
-    df_zone_costs = pd.DataFrame(
-        [(zone, cost) for zone, cost in result["zone_cost"].items()],
-        columns=["Zona", "Costo Total"],
+    # Crear un DataFrame con los tiempos por zona (Hoja "Metricas")
+    df_zone_times = pd.DataFrame(
+        [(f"Z{idx+1}", cost) for idx, (zone, cost) in enumerate(result["zone_cost"].items())],
+        columns=["Zona", "Tiempo"],
     )
 
-    # Crear un DataFrame con las métricas
-    df_metrics = pd.DataFrame(
-        [
-            ["Tiempo máximo de zona (W_max)", result["w_max"]],
-            ["Tiempo mínimo de zona (W_min)", result["w_min"]],
-            ["Diferencia (W_max - W_min)", result["w_max"] - result["w_min"]],
-        ],
-        columns=["Métrica", "Valor"],
+    # Extraer el nombre de la instancia del path
+    instance_name = os.path.basename(file_path).split('.')[0]
+    
+    # Crear un DataFrame con el resumen (Hoja "Resumen")
+    df_summary = pd.DataFrame(
+        [{
+            "Instancia": instance_name,
+            "Zona": f"Z{max(enumerate(result['zone_cost'].items()), key=lambda x: x[1][1])[0] + 1}",
+            "Maximo": result["w_max"]
+        }]
     )
 
     # Crear un escritor de Excel
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-        df_assignments.to_excel(writer, sheet_name="Asignaciones", index=False)
-        df_zone_costs.to_excel(writer, sheet_name="Costos por Zona", index=False)
-        df_metrics.to_excel(writer, sheet_name="Métricas", index=False)
+        df_assignments.to_excel(writer, sheet_name="Solucion", index=False)
+        df_zone_times.to_excel(writer, sheet_name="Metricas", index=False)
+        df_summary.to_excel(writer, sheet_name="Resumen", index=False)
 
     print(f"Archivo Excel generado: {output_file}")
-
 
 def mostrar_resultados(result, position_zone):
     """
@@ -304,27 +307,27 @@ if __name__ == "__main__":
 
     tasks = [
         (
-            "Data_PTL/Data_40_Salidas_composición_zonas_homo.xlsx",
+            "data/Data_PTL/Data_40_Salidas_composición_zonas_homo.xlsx",
             "Resultados_PTL/res_40_comp_homo.xlsx",
         ),
         (
-            "Data_PTL/Data_40_Salidas_composición_zonas_hetero.xlsx",
+            "data/Data_PTL/Data_40_Salidas_composición_zonas_hetero.xlsx",
             "Resultados_PTL/res_40_comp_hetero.xlsx",
         ),
         (
-            "Data_PTL/Data_60_Salidas_composición_zonas_hetero.xlsx",
+            "data/Data_PTL/Data_60_Salidas_composición_zonas_hetero.xlsx",
             "Resultados_PTL/res_60_comp_hetero.xlsx",
         ),
         (
-            "Data_PTL/Data_60_Salidas_composición_zonas_homo.xlsx",
+            "data/Data_PTL/Data_60_Salidas_composición_zonas_homo.xlsx",
             "Resultados_PTL/res_60_comp_homo.xlsx",
         ),
         (
-            "Data_PTL/Data_80_Salidas_composición_zonas_hetero.xlsx",
+            "data/Data_PTL/Data_80_Salidas_composición_zonas_hetero.xlsx",
             "Resultados_PTL/res_80_comp_hetero.xlsx",
         ),
         (
-            "Data_PTL/Data_80_Salidas_composición_zonas_homo.xlsx",
+            "data/Data_PTL/Data_80_Salidas_composición_zonas_homo.xlsx",
             "Resultados_PTL/res_80_comp_homo.xlsx",
         ),
     ]
@@ -335,4 +338,4 @@ if __name__ == "__main__":
         mostrar_resultados(result, position_zone)
 
         # Generar archivo Excel con las asignaciones
-        generar_excel_asignaciones(result, output_file)
+        generar_excel_asignaciones(result, output_file, file_path)

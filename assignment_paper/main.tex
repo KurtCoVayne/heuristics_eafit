@@ -90,29 +90,7 @@ El código implementa una solución heurística para el problema PTL y está org
 
 \subsection{Carga y Preparación de Datos}
 
-La carga de datos se realiza desde un archivo Excel con múltiples hojas:
-
-\begin{minted}[linenos]{python}
-def cargar_datos(file_path):
-    """
-    Carga los datos desde el archivo Excel.
-    """
-    df_positions_zones = pd.read_excel(
-        file_path, sheet_name="Tiempo_salida", index_col=0
-    )
-    df_orders_skus = pd.read_excel(file_path, sheet_name="Tiempo_SKU", index_col=0)
-    df_workers = pd.read_excel(file_path, sheet_name="Productividad")
-
-    try:
-        df_parameters = pd.read_excel(file_path, sheet_name="Parametros")
-    except ValueError:
-        df_parameters = pd.DataFrame({"v": [3.0]})
-        print("Advertencia: No se encontró la hoja 'Parametros', se usará un valor por defecto")
-
-    return df_positions_zones, df_orders_skus, df_workers, df_parameters
-\end{minted}
-
-Esta función carga:
+La carga de datos se realiza desde un archivo Excel con múltiples hojas que contienen la información necesaria para resolver el problema. Los datos se dividen en varios conjuntos y parámetros clave:
 \begin{itemize}
     \item La relación entre posiciones y zonas (\texttt{df\_positions\_zones})
     \item La relación entre órdenes y SKUs (\texttt{df\_orders\_skus})
@@ -122,119 +100,11 @@ Esta función carga:
 
 \subsection{Preparación de Datos}
 
-La función \texttt{preparar\_datos} extrae los conjuntos necesarios y calcula los parámetros del modelo:
-
-\begin{minted}[linenos]{python}
-def preparar_datos(df_positions_zones, df_orders_skus, df_parameters):
-    """
-    Prepara los datos para resolver el problema, extrayendo conjuntos y parámetros.
-    """
-    # Extracción de conjuntos
-    orders = list(df_orders_skus.index)
-    zones = list(df_positions_zones.index)
-    positions = list(df_positions_zones.columns)
-    skus = list(df_orders_skus.columns)
-
-    # Cálculo de parámetros
-    positions_in_each_zone = df_positions_zones > 0
-    cnt_positions_per_zone = positions_in_each_zone.sum(axis=1)
-    v = df_parameters["v"].values[0]
-
-    # Mapeo de posiciones a zonas
-    position_zone = {}
-    zone_positions = {}
-    for zone, row in positions_in_each_zone.iterrows():
-        zone_positions[zone] = positions_in_each_zone.columns[row.values].tolist()
-        for p in zone_positions[zone]:
-            position_zone[p] = zone
-
-    # Cálculo de tiempos de procesamiento
-    order_processing_time = df_orders_skus.sum(axis=1)
-    travel_time = 2 * (df_positions_zones / v)
-    travel_time_per_position = travel_time.sum(axis=0)
-
-    # Cálculo del costo total por orden y posición
-    order_position_cost = {}
-    for i in orders:
-        for k in positions:
-            order_position_cost[(i, k)] = (
-                order_processing_time[i] + travel_time_per_position[k]
-            )
-
-    return (
-        orders, zones, positions, skus, cnt_positions_per_zone,
-        position_zone, zone_positions, order_processing_time,
-        travel_time_per_position, order_position_cost,
-    )
-\end{minted}
-
-
-En esta función se obtienen los conjuntos y parámetros necesarios para resolver el problema, incluyendo el número de posiciones por zona, el mapeo entre posiciones y zonas, y los tiempos de procesamiento y viaje. Aunque el dataset contiene los conjuntos a parte, nuestra implementación los extrae directamente de los datos para mayor flexibilidad y facilidad de uso.
+La función \texttt{preparar\_datos} obtiene los conjuntos y parámetros necesarios para resolver el problema, incluyendo el número de posiciones por zona, el mapeo entre posiciones y zonas, y los tiempos de procesamiento y viaje. Aunque el dataset contiene los conjuntos a parte, nuestra implementación los extrae directamente de los datos para mayor flexibilidad y facilidad de uso.
 
 \subsection{Algoritmo Heurístico}
 
-La función \texttt{asignar\_ordenes} implementa la heurística constructiva:
-
-\begin{minted}[linenos, fontsize=\footnotesize]{python}
-def asignar_ordenes(
-    orders, zones, positions, position_zone, order_position_cost, cnt_positions_per_zone
-):
-    """
-    Asigna órdenes a posiciones utilizando una heurística constructiva voraz.
-    """
-    # Ordena las órdenes de mayor a menor tiempo de procesamiento
-    sorted_orders = sorted(
-        orders,
-        key=lambda i: sum([order_position_cost[(i, k)] for k in positions])
-        / len(positions),
-        reverse=True,
-    )
-
-    # Inicializa variables
-    assignments = []
-    zone_load = {j: 0 for j in zones}
-    position_assigned = {k: False for k in positions}
-    zone_remaining_positions = {j: cnt_positions_per_zone[j] for j in zones}
-
-    # Asignación voraz
-    for i in sorted_orders:
-        best_position = None
-        min_max_zone_time = float("inf")
-
-        for k in positions:
-            if position_assigned[k]:
-                continue
-
-            current_zone = position_zone[k]
-
-            if zone_remaining_positions[current_zone] <= 0:
-                continue
-
-            # Calcula nuevo tiempo si asignamos esta orden a esta posición
-            new_zone_load = zone_load[current_zone] + order_position_cost[(i, k)]
-
-            # Busca minimizar W_max
-            temp_zone_load = zone_load.copy()
-            temp_zone_load[current_zone] = new_zone_load
-            potential_max_zone_time = max(temp_zone_load.values())
-
-            if potential_max_zone_time < min_max_zone_time:
-                min_max_zone_time = potential_max_zone_time
-                best_position = k
-
-        # Realiza la asignación
-        if best_position is not None:
-            current_zone = position_zone[best_position]
-            zone_load[current_zone] += order_position_cost[(i, best_position)]
-            position_assigned[best_position] = True
-            zone_remaining_positions[current_zone] -= 1
-            assignments.append(
-                (i, best_position, order_position_cost[(i, best_position)])
-            )
-
-    return assignments, zone_load
-\end{minted}
-
+La función \texttt{asignar\_ordenes} implementa la heurística constructiva voráz.
 La heurística implementa:
 \begin{itemize}
     \item Un enfoque voraz donde se procesan las órdenes de mayor a menor tiempo de procesamiento
@@ -243,31 +113,7 @@ La heurística implementa:
     \item El objetivo es minimizar el valor máximo de carga entre todas las zonas (W\_max)
 \end{itemize}
 
-\subsection{Evaluación de la Solución}
 
-La función \texttt{evaluar\_solucion} calcula las métricas clave:
-
-\begin{minted}[linenos]{python}
-def evaluar_solucion(assignments, zone_load):
-    """
-    Evalúa la solución obtenida calculando métricas clave.
-    """
-    # Calcular valor objetivo y tiempo mínimo de zona
-    w_max = max(zone_load.values())
-    w_min = min(zone_load.values())
-
-    return {
-        "status": "solución heurística",
-        "assignments": sorted(
-            assignments, key=lambda x: int(x[0].split("_")[1]) if "_" in x[0] else x[0]
-        ),
-        "zone_cost": zone_load,
-        "objective_value": w_max,
-        "w_max": w_max,
-        "w_min": w_min,
-    }
-\end{minted}
-\clearpage
 \section{Comparación de Soluciones: Heurística vs Exacta}
 
 \subsection{Resultados Generales}
@@ -313,7 +159,7 @@ A continuación, se presenta una comparación entre los resultados obtenidos med
 \end{tikzpicture}
 \caption{Comparación gráfica del valor objetivo W\_max}
 \end{figure}
-\clearpage
+
 \subsection{Análisis de Desequilibrio entre Zonas}
 
 El desequilibrio entre zonas se mide como la diferencia entre el tiempo máximo (W\_max) y el tiempo mínimo (W\_min) entre todas las zonas. A continuación, se muestran los resultados:
@@ -358,7 +204,7 @@ El desequilibrio entre zonas se mide como la diferencia entre el tiempo máximo 
 \end{tikzpicture}
 \caption{Comparación del desequilibrio entre zonas}
 \end{figure}
-\clearpage
+
 \subsection{Comparación Detallada por Tipo de Instancia}
 
 \subsubsection{Distribución Homogénea vs Heterogénea}
@@ -398,53 +244,8 @@ Una diferencia fundamental entre la solución heurística y la exacta es el bala
 \end{itemize}
 
 Esto se debe a que la heurística, aunque busca minimizar el tiempo máximo (W\_max), no tiene un mecanismo explícito para equilibrar la carga entre zonas, a diferencia del modelo exacto que puede considerar todas las restricciones simultáneamente.
-\clearpage
-\section{Fortalezas y Debilidades de la Heurística}
 
-\subsection*{Fortalezas}
 
-\begin{itemize}
-    \item \textbf{Eficiencia Computacional:} La heurística es significativamente más rápida que la solución exacta, especialmente para instancias grandes.
-    
-    \item \textbf{Excelente Rendimiento en Distribución Homogénea:} La heurística obtiene resultados prácticamente óptimos cuando las zonas tienen un número similar de posiciones.
-    
-    \item \textbf{Implementación Simple:} El algoritmo es fácil de entender e implementar, lo que facilita su mantenimiento y adaptación.
-\end{itemize}
-
-\subsection*{Debilidades}
-
-\begin{itemize}
-    \item \textbf{Rendimiento Inferior en Distribución Heterogénea:} La heurística tiene dificultades para encontrar soluciones cercanas al óptimo cuando las zonas tienen diferentes cantidades de posiciones.
-    
-    \item \textbf{Desequilibrio entre Zonas:} No logra un equilibrio tan bueno como la solución exacta, especialmente en casos heterogéneos.
-    
-    \item \textbf{Dependencia del Orden:} El rendimiento depende significativamente del orden en que se procesan las órdenes, lo que puede llevar a soluciones subóptimas.
-\end{itemize}
-
-\section{Posibles Mejoras}
-
-\subsection{Mejoras en la Heurística}
-
-\begin{itemize}
-    \item \textbf{Múltiples Ordenamientos:} Probar diferentes estrategias de ordenamiento de órdenes y seleccionar la mejor solución.
-    
-    \item \textbf{Búsqueda Local:} Implementar una fase de mejora mediante búsqueda local, intercambiando asignaciones para reducir W\_max.
-    
-    \item \textbf{Enfoque Metaheurístico:} Utilizar algoritmos como Simulated Annealing o Búsqueda Tabú para escapar de óptimos locales.
-    
-    \item \textbf{Equilibrio Explícito:} Modificar la función de evaluación para considerar no solo la minimización de W\_max sino también el equilibrio entre zonas.
-\end{itemize}
-
-\subsection{Mejoras en la Implementación}
-
-\begin{itemize}
-    \item \textbf{Optimización del Código:} Utilizar estructuras de datos más eficientes y vectorizar operaciones para mejorar el rendimiento.
-    
-    \item \textbf{Paralelización:} Implementar versiones paralelas del algoritmo para aprovechar múltiples núcleos en instancias grandes.
-    
-    \item \textbf{Integración de Métodos:} Desarrollar un enfoque híbrido que combine la heurística para una solución inicial rápida y el método exacto para refinarla.
-\end{itemize}
-\clearpage
 \section{Conclusiones}
 
 \begin{enumerate}

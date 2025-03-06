@@ -137,34 +137,30 @@ def display_results(result):
     else:
         print("No optimal solution found:", result['status'])
 
-# Example usage:
 if __name__ == "__main__":
-    # file_path = "data.xlsx"
-    # result = solve_ptl_problem(file_path)
-    # display_results(result)
     tasks = [
         (
-            "Data_PTL/Data_40_Salidas_composición_zonas_homo.xlsx",
+            "data/Data_PTL/Data_40_Salidas_composición_zonas_homo.xlsx",
             "Resultados_PTL/res_40_comp_homo.xlsx",
         ),
         (
-            "Data_PTL/Data_40_Salidas_composición_zonas_hetero.xlsx",
+            "data/Data_PTL/Data_40_Salidas_composición_zonas_hetero.xlsx",
             "Resultados_PTL/res_40_comp_hetero.xlsx",
         ),
         (
-            "Data_PTL/Data_60_Salidas_composición_zonas_hetero.xlsx",
+            "data/Data_PTL/Data_60_Salidas_composición_zonas_hetero.xlsx",
             "Resultados_PTL/res_60_comp_hetero.xlsx",
         ),
         (
-            "Data_PTL/Data_60_Salidas_composición_zonas_homo.xlsx",
+            "data/Data_PTL/Data_60_Salidas_composición_zonas_homo.xlsx",
             "Resultados_PTL/res_60_comp_homo.xlsx",
         ),
         (
-            "Data_PTL/Data_80_Salidas_composición_zonas_hetero.xlsx",
+            "data/Data_PTL/Data_80_Salidas_composición_zonas_hetero.xlsx",
             "Resultados_PTL/res_80_comp_hetero.xlsx",
         ),
         (
-            "Data_PTL/Data_80_Salidas_composición_zonas_homo.xlsx",
+            "data/Data_PTL/Data_80_Salidas_composición_zonas_homo.xlsx",
             "Resultados_PTL/res_80_comp_homo.xlsx",
         ),
     ]
