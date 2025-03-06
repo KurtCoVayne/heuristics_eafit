@@ -1,0 +1,5 @@
+.venv
+*.zip
+*.aux
+*.gz
+_minted*

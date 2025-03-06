@@ -1,0 +1,472 @@
+\documentclass{hw-template}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{lipsum}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage[shortlabels]{enumitem}
+\usepackage{minted}
+
+% Set lang to spanish
+\usepackage[spanish]{babel}
+
+\pgfplotsset{compat=1.18}
+
+\newcommand*{\name}{John Alejandro González }
+\newcommand*{\id}{1013336184}
+\newcommand*{\course}{Heuristica (CM0439)}
+\newcommand*{\assignment}{Entrega I}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Este informe presenta un análisis detallado del sistema Put-to-Light (PTL) para la asignación de órdenes a posiciones en un centro de distribución. Se implementa y evalúa un enfoque heurístico para resolver el problema de asignación de órdenes, minimizando el tiempo máximo de procesamiento entre zonas. Se realiza una comparación exhaustiva entre la solución heurística y la solución exacta, analizando la calidad de las soluciones, tiempos de ejecución y diferencias en la distribución de carga entre zonas para distintos escenarios de prueba. La implementación se realiza en Python, se puede encontrar en el repositorio de Github: \url{
+    https://github.com/KurtCoVayne/heuristics_eafit}, allí también se encuentra el algoritmo de solución exacta usando Google OR-Tools.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introducción}
+
+El problema de asignación de órdenes en sistemas Put-to-Light (PTL) es un desafío crítico en la logística moderna de centros de distribución. El objetivo principal es asignar órdenes a posiciones específicas de manera que se minimice el tiempo máximo de procesamiento entre diferentes zonas de trabajo, balanceando así la carga laboral y optimizando la eficiencia operativa.
+
+Este trabajo presenta una implementación heurística para resolver este problema y compara sus resultados con una solución exacta, evaluando el rendimiento en términos de calidad de solución y eficiencia computacional.
+
+\section{Formulación del Problema}
+
+
+\subsection{Conjuntos}
+\begin{itemize}
+    \item $P$: Conjunto de órdenes (pedidos)
+    \item $Z$: Conjunto de zonas
+    \item $S$: Conjunto de posiciones de salida
+    \item $R$: Conjunto de SKUs (artículos únicos)
+\end{itemize}
+
+\subsection{Parámetros}
+\begin{itemize}
+    \item $s_{jk}$: Parámetro binario que indica si la posición $k \in S$ pertenece a la zona $j \in Z$
+    \item $ns_j$: Número de posiciones en la zona $j$
+    \item $rp_{im}$: Parámetro binario que indica si el SKU $m \in R$ pertenece a la orden $i \in P$
+    \item $d_{jk}$: Distancia desde la zona $j$ a la posición $k$
+    \item $tr_{im}$: Tiempo para clasificar el SKU $m$ en la orden $i$
+    \item $v$: Velocidad promedio de los trabajadores
+\end{itemize}
+
+\subsection{Variables de Decisión}
+\begin{itemize}
+    \item $X_{ik}$: Variable binaria que indica si la orden $i$ se asigna a la posición $k$
+\end{itemize}
+
+\subsection{Función Objetivo}
+Minimizar $W_{max}$, el tiempo máximo de procesamiento entre todas las zonas.
+
+\subsection{Restricciones}
+\begin{itemize}
+    \item Cada orden debe asignarse exactamente a una posición
+    \item Cada posición puede recibir como máximo una orden
+    \item El número de órdenes asignadas a una zona no puede exceder el número de posiciones en esa zona
+    \item El tiempo total de procesamiento para una zona es la suma de los tiempos de procesamiento de todas las órdenes asignadas a posiciones en esa zona
+    \item El tiempo máximo debe ser mayor o igual que el tiempo de cualquier zona
+\end{itemize}
+
+\section{Análisis del Código}
+
+\subsection{Estructura General}
+
+El código implementa una solución heurística para el problema PTL y está organizado en varias funciones principales:
+
+\begin{enumerate}
+    \item \texttt{cargar\_datos}: Carga los datos desde un archivo Excel
+    \item \texttt{preparar\_datos}: Prepara los conjuntos y parámetros necesarios
+    \item \texttt{asignar\_ordenes}: Implementa la heurística para asignar órdenes a posiciones
+    \item \texttt{evaluar\_solucion}: Evalúa la solución obtenida
+    \item \texttt{generar\_excel\_asignaciones}: Genera un archivo Excel con los resultados
+    \item \texttt{mostrar\_resultados}: Muestra los resultados en consola
+    \item \texttt{solve\_ptl\_heuristic}: Función principal que orquesta el proceso
+\end{enumerate}
+
+\subsection{Carga y Preparación de Datos}
+
+La carga de datos se realiza desde un archivo Excel con múltiples hojas:
+
+\begin{minted}[linenos]{python}
+def cargar_datos(file_path):
+    """
+    Carga los datos desde el archivo Excel.
+    """
+    df_positions_zones = pd.read_excel(
+        file_path, sheet_name="Tiempo_salida", index_col=0
+    )
+    df_orders_skus = pd.read_excel(file_path, sheet_name="Tiempo_SKU", index_col=0)
+    df_workers = pd.read_excel(file_path, sheet_name="Productividad")
+
+    try:
+        df_parameters = pd.read_excel(file_path, sheet_name="Parametros")
+    except ValueError:
+        df_parameters = pd.DataFrame({"v": [3.0]})
+        print("Advertencia: No se encontró la hoja 'Parametros', se usará un valor por defecto")
+
+    return df_positions_zones, df_orders_skus, df_workers, df_parameters
+\end{minted}
+
+Esta función carga:
+\begin{itemize}
+    \item La relación entre posiciones y zonas (\texttt{df\_positions\_zones})
+    \item La relación entre órdenes y SKUs (\texttt{df\_orders\_skus})
+    \item Datos de productividad de trabajadores (\texttt{df\_workers})
+    \item Parámetros generales como la velocidad de desplazamiento (\texttt{df\_parameters})
+\end{itemize}
+
+\subsection{Preparación de Datos}
+
+La función \texttt{preparar\_datos} extrae los conjuntos necesarios y calcula los parámetros del modelo:
+
+\begin{minted}[linenos]{python}
+def preparar_datos(df_positions_zones, df_orders_skus, df_parameters):
+    """
+    Prepara los datos para resolver el problema, extrayendo conjuntos y parámetros.
+    """
+    # Extracción de conjuntos
+    orders = list(df_orders_skus.index)
+    zones = list(df_positions_zones.index)
+    positions = list(df_positions_zones.columns)
+    skus = list(df_orders_skus.columns)
+
+    # Cálculo de parámetros
+    positions_in_each_zone = df_positions_zones > 0
+    cnt_positions_per_zone = positions_in_each_zone.sum(axis=1)
+    v = df_parameters["v"].values[0]
+
+    # Mapeo de posiciones a zonas
+    position_zone = {}
+    zone_positions = {}
+    for zone, row in positions_in_each_zone.iterrows():
+        zone_positions[zone] = positions_in_each_zone.columns[row.values].tolist()
+        for p in zone_positions[zone]:
+            position_zone[p] = zone
+
+    # Cálculo de tiempos de procesamiento
+    order_processing_time = df_orders_skus.sum(axis=1)
+    travel_time = 2 * (df_positions_zones / v)
+    travel_time_per_position = travel_time.sum(axis=0)
+
+    # Cálculo del costo total por orden y posición
+    order_position_cost = {}
+    for i in orders:
+        for k in positions:
+            order_position_cost[(i, k)] = (
+                order_processing_time[i] + travel_time_per_position[k]
+            )
+
+    return (
+        orders, zones, positions, skus, cnt_positions_per_zone,
+        position_zone, zone_positions, order_processing_time,
+        travel_time_per_position, order_position_cost,
+    )
+\end{minted}
+
+
+En esta función se obtienen los conjuntos y parámetros necesarios para resolver el problema, incluyendo el número de posiciones por zona, el mapeo entre posiciones y zonas, y los tiempos de procesamiento y viaje. Aunque el dataset contiene los conjuntos a parte, nuestra implementación los extrae directamente de los datos para mayor flexibilidad y facilidad de uso.
+
+\subsection{Algoritmo Heurístico}
+
+La función \texttt{asignar\_ordenes} implementa la heurística constructiva:
+
+\begin{minted}[linenos, fontsize=\footnotesize]{python}
+def asignar_ordenes(
+    orders, zones, positions, position_zone, order_position_cost, cnt_positions_per_zone
+):
+    """
+    Asigna órdenes a posiciones utilizando una heurística constructiva voraz.
+    """
+    # Ordena las órdenes de mayor a menor tiempo de procesamiento
+    sorted_orders = sorted(
+        orders,
+        key=lambda i: sum([order_position_cost[(i, k)] for k in positions])
+        / len(positions),
+        reverse=True,
+    )
+
+    # Inicializa variables
+    assignments = []
+    zone_load = {j: 0 for j in zones}
+    position_assigned = {k: False for k in positions}
+    zone_remaining_positions = {j: cnt_positions_per_zone[j] for j in zones}
+
+    # Asignación voraz
+    for i in sorted_orders:
+        best_position = None
+        min_max_zone_time = float("inf")
+
+        for k in positions:
+            if position_assigned[k]:
+                continue
+
+            current_zone = position_zone[k]
+
+            if zone_remaining_positions[current_zone] <= 0:
+                continue
+
+            # Calcula nuevo tiempo si asignamos esta orden a esta posición
+            new_zone_load = zone_load[current_zone] + order_position_cost[(i, k)]
+
+            # Busca minimizar W_max
+            temp_zone_load = zone_load.copy()
+            temp_zone_load[current_zone] = new_zone_load
+            potential_max_zone_time = max(temp_zone_load.values())
+
+            if potential_max_zone_time < min_max_zone_time:
+                min_max_zone_time = potential_max_zone_time
+                best_position = k
+
+        # Realiza la asignación
+        if best_position is not None:
+            current_zone = position_zone[best_position]
+            zone_load[current_zone] += order_position_cost[(i, best_position)]
+            position_assigned[best_position] = True
+            zone_remaining_positions[current_zone] -= 1
+            assignments.append(
+                (i, best_position, order_position_cost[(i, best_position)])
+            )
+
+    return assignments, zone_load
+\end{minted}
+
+La heurística implementa:
+\begin{itemize}
+    \item Un enfoque voraz donde se procesan las órdenes de mayor a menor tiempo de procesamiento
+    \item Para cada orden, se busca la posición que minimice el tiempo máximo de procesamiento entre zonas
+    \item Se respetan las restricciones del problema: cada orden a una posición, cada posición con máximo una orden, y no exceder el número de posiciones por zona
+    \item El objetivo es minimizar el valor máximo de carga entre todas las zonas (W\_max)
+\end{itemize}
+
+\subsection{Evaluación de la Solución}
+
+La función \texttt{evaluar\_solucion} calcula las métricas clave:
+
+\begin{minted}[linenos]{python}
+def evaluar_solucion(assignments, zone_load):
+    """
+    Evalúa la solución obtenida calculando métricas clave.
+    """
+    # Calcular valor objetivo y tiempo mínimo de zona
+    w_max = max(zone_load.values())
+    w_min = min(zone_load.values())
+
+    return {
+        "status": "solución heurística",
+        "assignments": sorted(
+            assignments, key=lambda x: int(x[0].split("_")[1]) if "_" in x[0] else x[0]
+        ),
+        "zone_cost": zone_load,
+        "objective_value": w_max,
+        "w_max": w_max,
+        "w_min": w_min,
+    }
+\end{minted}
+\clearpage
+\section{Comparación de Soluciones: Heurística vs Exacta}
+
+\subsection{Resultados Generales}
+
+A continuación, se presenta una comparación entre los resultados obtenidos mediante el método heurístico y el método exacto para los diferentes escenarios de prueba:
+
+\begin{table}[h]
+\centering
+\caption{Comparación de resultados: Heurística vs Exacta}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Instancia} & \textbf{W\_max Heurística} & \textbf{W\_max Exacta} & \textbf{Gap (\%)} & \textbf{Diferencia} \\ \hline
+40\_comp\_homo     & 361.00                    & 358.42               & 0.72\%          & 2.58               \\ \hline
+40\_comp\_hetero   & 395.60                    & 358.85               & 10.24\%         & 36.75              \\ \hline
+60\_comp\_hetero   & 411.12                    & 388.77               & 5.75\%          & 22.35              \\ \hline
+60\_comp\_homo     & 388.00                    & 388.25               & -0.06\%         & -0.25              \\ \hline
+80\_comp\_hetero   & 414.18                    & 374.18               & 10.69\%         & 40.00              \\ \hline
+80\_comp\_homo     & 404.70                    & 404.70               & 0.00\%          & 0.00               \\ \hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    bar width=0.6cm,
+    width=\textwidth,
+    height=10cm,
+    legend style={at={(0.5,1.05)},
+    anchor=south,legend columns=-1},
+    symbolic x coords={40\_homo, 40\_hetero, 60\_hetero, 60\_homo, 80\_hetero, 80\_homo},
+    xtick=data,
+    xticklabel style={rotate=45,anchor=east},
+    nodes near coords,
+    ylabel={Tiempo máximo (W\_max)},
+    title={Comparación de W\_max: Heurística vs Exacta},
+]
+\addplot coordinates {(40\_homo, 361.00) (40\_hetero, 395.60) (60\_hetero, 411.12) (60\_homo, 388.00) (80\_hetero, 414.18) (80\_homo, 404.70)};
+\addplot coordinates {(40\_homo, 358.42) (40\_hetero, 358.85) (60\_hetero, 388.77) (60\_homo, 388.25) (80\_hetero, 374.18) (80\_homo, 404.70)};
+\legend{Heurística, Exacta}
+\end{axis}
+\end{tikzpicture}
+\caption{Comparación gráfica del valor objetivo W\_max}
+\end{figure}
+\clearpage
+\subsection{Análisis de Desequilibrio entre Zonas}
+
+El desequilibrio entre zonas se mide como la diferencia entre el tiempo máximo (W\_max) y el tiempo mínimo (W\_min) entre todas las zonas. A continuación, se muestran los resultados:
+
+\begin{table}[h]
+\centering
+\caption{Comparación de desequilibrio entre zonas}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Instancia} & \textbf{W\_max - W\_min (Heur.)} & \textbf{W\_max - W\_min (Exacta)} \\ \hline
+40\_comp\_homo     & 5.25                           & 0.09                            \\ \hline
+40\_comp\_hetero   & 73.50                          & 0.00                            \\ \hline
+60\_comp\_hetero   & 63.61                          & 1.04                            \\ \hline
+60\_comp\_homo     & 0.25                           & 1.00                            \\ \hline
+80\_comp\_hetero   & 80.33                          & 0.25                            \\ \hline
+80\_comp\_homo     & 0.50                           & 0.33                            \\ \hline
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    ybar,
+    bar width=0.6cm,
+    width=\textwidth,
+    height=10cm,
+    legend style={at={(0.5,1.05)},
+    anchor=south,legend columns=-1},
+    symbolic x coords={40\_homo, 40\_hetero, 60\_hetero, 60\_homo, 80\_hetero, 80\_homo},
+    xtick=data,
+    xticklabel style={rotate=45,anchor=east},
+    nodes near coords,
+    ylabel={Desequilibrio (W\_max - W\_min)},
+    title={Comparación de Desequilibrio entre Zonas},
+    ymax=90,
+]
+\addplot coordinates {(40\_homo, 5.25) (40\_hetero, 73.50) (60\_hetero, 63.61) (60\_homo, 0.25) (80\_hetero, 80.33) (80\_homo, 0.50)};
+\addplot coordinates {(40\_homo, 0.09) (40\_hetero, 0.00) (60\_hetero, 1.04) (60\_homo, 1.00) (80\_hetero, 0.25) (80\_homo, 0.33)};
+\legend{Heurística, Exacta}
+\end{axis}
+\end{tikzpicture}
+\caption{Comparación del desequilibrio entre zonas}
+\end{figure}
+\clearpage
+\subsection{Comparación Detallada por Tipo de Instancia}
+
+\subsubsection{Distribución Homogénea vs Heterogénea}
+
+Los resultados muestran un patrón claro:
+
+\begin{itemize}
+    \item \textbf{Distribución Homogénea:} En las instancias con distribución homogénea de posiciones entre zonas (40\_homo, 60\_homo, 80\_homo), la heurística obtiene resultados muy cercanos o incluso iguales a la solución exacta, con gaps menores al 1\%.
+    
+    \item \textbf{Distribución Heterogénea:} En las instancias con distribución heterogénea (40\_hetero, 60\_hetero, 80\_hetero), la heurística muestra un rendimiento significativamente inferior, con gaps de hasta 10.69\%.
+\end{itemize}
+
+\subsubsection{Influencia del Tamaño del Problema}
+
+El tamaño del problema también influye en el rendimiento de la heurística:
+
+\begin{itemize}
+    \item En problemas más pequeños (40 posiciones), la heurística obtiene mejores resultados en distribución homogénea (gap 0.72\%) que en heterogénea (gap 10.24\%).
+    
+    \item En problemas medianos (60 posiciones), la heurística obtiene resultados excepcionales en distribución homogénea (gap -0.06\%, incluso mejor que la solución exacta reportada) y moderados en heterogénea (gap 5.75\%).
+    
+    \item En problemas grandes (80 posiciones), la heurística mantiene su buen rendimiento en distribución homogénea (gap 0.00\%) pero sigue teniendo dificultades con distribución heterogénea (gap 10.69\%).
+\end{itemize}
+
+\subsection{Análisis del Desequilibrio entre Zonas}
+
+Una diferencia fundamental entre la solución heurística y la exacta es el balance de carga entre zonas:
+
+\begin{itemize}
+    \item \textbf{Solución Exacta:} Logra un equilibrio casi perfecto entre zonas, con diferencias entre W\_max y W\_min menores a 1.04 unidades en todos los casos.
+    
+    \item \textbf{Solución Heurística:} 
+    \begin{itemize}
+        \item En distribución homogénea: Mantiene un buen equilibrio, con diferencias menores a 5.25 unidades.
+        \item En distribución heterogénea: Presenta desequilibrios severos, con diferencias de hasta 80.33 unidades.
+    \end{itemize}
+\end{itemize}
+
+Esto se debe a que la heurística, aunque busca minimizar el tiempo máximo (W\_max), no tiene un mecanismo explícito para equilibrar la carga entre zonas, a diferencia del modelo exacto que puede considerar todas las restricciones simultáneamente.
+\clearpage
+\section{Fortalezas y Debilidades de la Heurística}
+
+\subsection*{Fortalezas}
+
+\begin{itemize}
+    \item \textbf{Eficiencia Computacional:} La heurística es significativamente más rápida que la solución exacta, especialmente para instancias grandes.
+    
+    \item \textbf{Excelente Rendimiento en Distribución Homogénea:} La heurística obtiene resultados prácticamente óptimos cuando las zonas tienen un número similar de posiciones.
+    
+    \item \textbf{Implementación Simple:} El algoritmo es fácil de entender e implementar, lo que facilita su mantenimiento y adaptación.
+\end{itemize}
+
+\subsection*{Debilidades}
+
+\begin{itemize}
+    \item \textbf{Rendimiento Inferior en Distribución Heterogénea:} La heurística tiene dificultades para encontrar soluciones cercanas al óptimo cuando las zonas tienen diferentes cantidades de posiciones.
+    
+    \item \textbf{Desequilibrio entre Zonas:} No logra un equilibrio tan bueno como la solución exacta, especialmente en casos heterogéneos.
+    
+    \item \textbf{Dependencia del Orden:} El rendimiento depende significativamente del orden en que se procesan las órdenes, lo que puede llevar a soluciones subóptimas.
+\end{itemize}
+
+\section{Posibles Mejoras}
+
+\subsection{Mejoras en la Heurística}
+
+\begin{itemize}
+    \item \textbf{Múltiples Ordenamientos:} Probar diferentes estrategias de ordenamiento de órdenes y seleccionar la mejor solución.
+    
+    \item \textbf{Búsqueda Local:} Implementar una fase de mejora mediante búsqueda local, intercambiando asignaciones para reducir W\_max.
+    
+    \item \textbf{Enfoque Metaheurístico:} Utilizar algoritmos como Simulated Annealing o Búsqueda Tabú para escapar de óptimos locales.
+    
+    \item \textbf{Equilibrio Explícito:} Modificar la función de evaluación para considerar no solo la minimización de W\_max sino también el equilibrio entre zonas.
+\end{itemize}
+
+\subsection{Mejoras en la Implementación}
+
+\begin{itemize}
+    \item \textbf{Optimización del Código:} Utilizar estructuras de datos más eficientes y vectorizar operaciones para mejorar el rendimiento.
+    
+    \item \textbf{Paralelización:} Implementar versiones paralelas del algoritmo para aprovechar múltiples núcleos en instancias grandes.
+    
+    \item \textbf{Integración de Métodos:} Desarrollar un enfoque híbrido que combine la heurística para una solución inicial rápida y el método exacto para refinarla.
+\end{itemize}
+\clearpage
+\section{Conclusiones}
+
+\begin{enumerate}
+    \item \textbf{Rendimiento General:} La heurística propuesta obtiene resultados competitivos en la mayoría de las instancias, con un gap promedio del 4.56\% respecto a la solución exacta.
+    
+    \item \textbf{Distribución Homogénea:} La heurística es altamente efectiva en escenarios con distribución homogénea, con gaps promedio del 0.22\%.
+    
+    \item \textbf{Distribución Heterogénea:} El rendimiento es significativamente inferior en escenarios heterogéneos, con gaps promedio del 8.89\%.
+    
+    \item \textbf{Equilibrio:} La solución exacta logra un equilibrio casi perfecto entre zonas en todos los escenarios, mientras que la heurística solo lo consigue en casos homogéneos.
+    
+    \item \textbf{Aplicabilidad:} La heurística es una alternativa viable para la solución rápida de problemas en entornos homogéneos o cuando no se requiere un equilibrio perfecto entre zonas.
+\end{enumerate}
+
+El problema de asignación de órdenes en sistemas PTL es un desafío complejo que requiere equilibrar múltiples objetivos. La heurística propuesta ofrece una solución práctica que, aunque no siempre alcanza la optimalidad, proporciona resultados rápidos y de calidad razonable, especialmente en escenarios con distribución homogénea de posiciones. Para escenarios heterogéneos o cuando se requiere un equilibrio perfecto entre zonas, la solución exacta sigue siendo la opción preferida.
+
+% \section{Referencias}
+
+% \begin{enumerate}
+%     \item Martello, S., \& Toth, P. (1990). Knapsack problems: algorithms and computer implementations. John Wiley \& Sons.
+%     \item Gendreau, M., \& Potvin, J. Y. (2010). Handbook of metaheuristics. Springer.
+%     \item Pinedo, M. L. (2012). Scheduling: theory, algorithms, and systems. Springer.
+% \end{enumerate}
+
+\end{document}
